@@ -117,7 +117,8 @@ ENV CC=gcc14-gcc \
 
 RUN dnf install -y \
         gcc14 gcc14-c++ \
-        ninja-build git \
+        make ninja-build git \
+        openssh-clients \
         openssl-devel \
         zlib-devel \
         libzstd-devel \
@@ -158,7 +159,13 @@ RUN git clone --depth 1 --branch "${CUTELYST_REF}" \
 # Stage 3 – dev / build-base  (FROM this to compile your Cutelyst app)
 ###############################################################################
 FROM builder AS dev
-# Inherits full toolchain + Qt headers + Cutelee/Cutelyst headers & cmake files
+ARG QT_PREFIX
+
+# Convenience env vars so downstream Dockerfiles need zero extra config
+ENV CMAKE_PREFIX_PATH="${QT_PREFIX}:/usr/local" \
+    PKG_CONFIG_PATH="${QT_PREFIX}/lib/pkgconfig:/usr/local/lib64/pkgconfig" \
+    QT_ROOT="${QT_PREFIX}" \
+    PATH="${QT_PREFIX}/bin:${PATH}"
 
 ###############################################################################
 # Stage 4 – lean runtime image
@@ -181,17 +188,21 @@ RUN dnf install -y \
         brotli \
     && dnf clean all
 
-# Qt shared libraries + plugins (structure kept intact for plugin discovery)
+# Qt shared libraries, tools, and plugins (bin+libexec needed for syncqt/cmake)
 COPY --from=builder ${QT_PREFIX}/lib     ${QT_PREFIX}/lib
 COPY --from=builder ${QT_PREFIX}/plugins ${QT_PREFIX}/plugins
+COPY --from=builder ${QT_PREFIX}/bin     ${QT_PREFIX}/bin
+COPY --from=builder ${QT_PREFIX}/libexec ${QT_PREFIX}/libexec
 
 # Cutelee + Cutelyst shared libraries
 COPY --from=builder /usr/local/lib   /usr/local/lib
 COPY --from=builder /usr/local/lib64 /usr/local/lib64
 
-ENV QT_ROOT=${QT_PREFIX}
-ENV LD_LIBRARY_PATH="${QT_PREFIX}/lib:/usr/local/lib:/usr/local/lib64"
-ENV QT_PLUGIN_PATH="${QT_PREFIX}/plugins"
+ENV QT_ROOT=${QT_PREFIX} \
+    CMAKE_PREFIX_PATH="${QT_PREFIX}:/usr/local" \
+    LD_LIBRARY_PATH="${QT_PREFIX}/lib:/usr/local/lib:/usr/local/lib64" \
+    QT_PLUGIN_PATH="${QT_PREFIX}/plugins" \
+    PATH="${QT_PREFIX}/bin:${PATH}"
 # No display available in a container; offscreen is the safe default
 ENV QT_QPA_PLATFORM=offscreen
 

@@ -14,46 +14,36 @@ Multi-stage Docker image based on **Amazon Linux 2023** with a fully source-buil
 
 | Path | Contents |
 |------|----------|
-| `/opt/qt6/` | Qt shared libraries + plugins |
+| `/opt/qt6/` | Qt libs, tools (`bin/`, `libexec/`), headers, plugins |
 | `/usr/local/lib64/` | Cutelee + Cutelyst shared libraries and plugins |
-| `/usr/local/lib64/cmake/` | CMake config files for find_package |
+| `/usr/local/lib64/cmake/` | CMake config files for `find_package` |
 
-## Targets
+## Tags
 
-| Target | Use |
-|--------|-----|
-| `runtime` | Minimal runtime image — only `.so` files, no headers or build tools |
-| `dev` | Full build-base — Qt/Cutelee/Cutelyst headers, cmake configs, GCC 14, ninja |
-| `qt-builder` | Intermediate: Qt 6 built from source |
+| Tag | Target | Use |
+|-----|--------|-----|
+| `latest`, `dev` | `dev` | **Build base** — GCC 14, cmake, make, git, openssh, full Qt/Cutelee/Cutelyst headers + tools |
+| `runtime`, `qt6.8.3-cutelyst5.0.1-runtime` | `runtime` | **Lean runtime** — only `.so` files + Qt plugins |
 
 ## Usage
-
-### Pull from GHCR
-
-```bash
-# runtime
-docker pull ghcr.io/nostalpixel/awslinux-cutelyst:latest
-
-# pinned version
-docker pull ghcr.io/nostalpixel/awslinux-cutelyst:qt6.8.3-cutelyst5.0.1
-```
 
 ### Build your Cutelyst app
 
 ```dockerfile
-FROM ghcr.io/nostalpixel/awslinux-cutelyst:latest AS dev
+FROM ghcr.io/nostalpixel/awslinux-cutelyst:latest AS build
 
 COPY . /src/myapp
 RUN cmake -S /src/myapp -B /build/myapp -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="/opt/qt6;/usr/local" \
     && cmake --build /build/myapp -j"$(nproc)" \
-    && cmake --install /build/myapp
+    && cmake --install /build/myapp --prefix /app
 
-FROM ghcr.io/nostalpixel/awslinux-cutelyst:latest
-COPY --from=dev /usr/local/bin/myapp /usr/local/bin/myapp
-CMD ["/usr/local/bin/myapp", "--server"]
+FROM ghcr.io/nostalpixel/awslinux-cutelyst:runtime
+COPY --from=build /app /app
+CMD ["/app/bin/myapp", "--server"]
 ```
+
+`CMAKE_PREFIX_PATH` is pre-set to `/opt/qt6:/usr/local` in the image, so no extra cmake flags are needed.
 
 ## Build arguments
 
