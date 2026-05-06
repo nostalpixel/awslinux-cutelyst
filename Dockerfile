@@ -6,7 +6,7 @@ ARG CUTELYST_REF=v5.0.1
 ARG QT_PREFIX=/opt/qt6
 
 ###############################################################################
-# Stage 1 – build Qt 6 from source (qtbase + qttools)
+# Stage 1 – build Qt 6 from source (qtbase + qtdeclarative + qttools)
 #
 # Cutelyst v5 requires C++23; GCC 14 is the only C++23-capable compiler
 # shipped by Amazon Linux 2023 (default is GCC 11).
@@ -124,6 +124,7 @@ RUN dnf install -y \
         libzstd-devel \
         libicu-devel \
         brotli-devel \
+        softhsm \
         perl \
         python3 python3-pip \
     && pip3 install --quiet cmake \
@@ -157,23 +158,36 @@ RUN git clone --depth 1 --branch "${CUTELYST_REF}" \
 
 ###############################################################################
 # Stage 3 – dev / build-base  (FROM this to compile your Cutelyst app)
+#
+# Ships everything needed to compile against Qt6, Cutelee, and Cutelyst:
+#   - GCC 14, cmake, make, ninja, git, openssh-clients
+#   - Qt6 headers, cmake configs, tools (moc, rcc, lrelease, syncqt…)
+#   - Cutelee + Cutelyst headers, cmake configs, shared libs
+#   - SoftHSM2 (softhsm2-util) for PKCS#11 / TLS key testing
 ###############################################################################
 FROM builder AS dev
 ARG QT_PREFIX
 
-# Convenience env vars so downstream Dockerfiles need zero extra config
 ENV CMAKE_PREFIX_PATH="${QT_PREFIX}:/usr/local" \
     PKG_CONFIG_PATH="${QT_PREFIX}/lib/pkgconfig:/usr/local/lib64/pkgconfig" \
     QT_ROOT="${QT_PREFIX}" \
+    QT_QPA_PLATFORM=offscreen \
     PATH="${QT_PREFIX}/bin:${PATH}"
 
 ###############################################################################
-# Stage 4 – lean runtime image
+# Stage 4 – runtime image
+#
+# Ships everything needed to RUN a Cutelyst application:
+#   - Qt6 shared libs, tools (bin/libexec for syncqt), plugins
+#   - Cutelee + Cutelyst shared libs, cmake configs, headers
+#   - SoftHSM2 runtime
+#
+# NOTE: headers and cmake configs are included so this image can also serve
+# as a minimal build env (find_package works out of the box).
 ###############################################################################
 FROM amazonlinux:2023 AS runtime
 ARG QT_PREFIX
 
-# gcc14 provides the libstdc++ version that our GCC-14-compiled .so files need
 RUN dnf install -y \
         gcc14 \
         openssl-libs \
@@ -186,25 +200,29 @@ RUN dnf install -y \
         libjpeg-turbo \
         mesa-libGL \
         brotli \
+        softhsm \
     && dnf clean all
 
-# Qt shared libraries, tools, and plugins (bin+libexec needed for syncqt/cmake)
+# Qt: libs + tools + plugins + headers + mkspecs (cmake find_package needs all)
 COPY --from=builder ${QT_PREFIX}/lib     ${QT_PREFIX}/lib
 COPY --from=builder ${QT_PREFIX}/plugins ${QT_PREFIX}/plugins
 COPY --from=builder ${QT_PREFIX}/bin     ${QT_PREFIX}/bin
 COPY --from=builder ${QT_PREFIX}/libexec ${QT_PREFIX}/libexec
+COPY --from=builder ${QT_PREFIX}/include ${QT_PREFIX}/include
+COPY --from=builder ${QT_PREFIX}/mkspecs ${QT_PREFIX}/mkspecs
 
-# Cutelee + Cutelyst shared libraries
-COPY --from=builder /usr/local/lib   /usr/local/lib
-COPY --from=builder /usr/local/lib64 /usr/local/lib64
+# Cutelee + Cutelyst: libs, cmake configs, headers, plugins
+COPY --from=builder /usr/local/lib     /usr/local/lib
+COPY --from=builder /usr/local/lib64   /usr/local/lib64
+COPY --from=builder /usr/local/include /usr/local/include
 
 ENV QT_ROOT=${QT_PREFIX} \
     CMAKE_PREFIX_PATH="${QT_PREFIX}:/usr/local" \
+    PKG_CONFIG_PATH="${QT_PREFIX}/lib/pkgconfig:/usr/local/lib64/pkgconfig" \
     LD_LIBRARY_PATH="${QT_PREFIX}/lib:/usr/local/lib:/usr/local/lib64" \
     QT_PLUGIN_PATH="${QT_PREFIX}/plugins" \
+    QT_QPA_PLATFORM=offscreen \
     PATH="${QT_PREFIX}/bin:${PATH}"
-# No display available in a container; offscreen is the safe default
-ENV QT_QPA_PLATFORM=offscreen
 
 RUN printf '%s\n' "${QT_PREFIX}/lib" '/usr/local/lib' '/usr/local/lib64' \
         > /etc/ld.so.conf.d/qt6-cutelyst.conf && \
