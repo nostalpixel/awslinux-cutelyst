@@ -133,23 +133,29 @@ RUN dnf install -y \
 COPY --from=qt-builder ${QT_PREFIX} ${QT_PREFIX}
 
 # ── Cutelee ──────────────────────────────────────────────────────────────────
+# Force CMAKE_INSTALL_LIBDIR=lib (not lib64) so the cmake config lands in
+# /usr/local/lib/cmake/Cutelee6Qt6, which cmake's prefix search always checks.
 RUN git clone --depth 1 --branch "${CUTELEE_REF}" \
         https://github.com/cutelyst/cutelee /src/cutelee && \
     cmake -S /src/cutelee -B /build/cutelee -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_TESTS=OFF && \
     cmake --build /build/cutelee -j"$(nproc)" && \
     cmake --install /build/cutelee && \
     rm -rf /src/cutelee /build/cutelee
 
 # ── Cutelyst ─────────────────────────────────────────────────────────────────
+# Cutelee6Qt6_DIR is explicit so cmake never falls back to a heuristic search.
 RUN git clone --depth 1 --branch "${CUTELYST_REF}" \
         https://github.com/cutelyst/cutelyst /src/cutelyst && \
     cmake -S /src/cutelyst -B /build/cutelyst -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_INSTALL_LIBDIR=lib \
         -DCMAKE_PREFIX_PATH="${QT_PREFIX};/usr/local" \
+        -DCutelee6Qt6_DIR=/usr/local/lib/cmake/Cutelee6Qt6 \
         -DPLUGIN_VIEW_CUTELEE=ON \
         -DBUILD_TESTS=OFF && \
     cmake --build /build/cutelyst -j"$(nproc)" && \
